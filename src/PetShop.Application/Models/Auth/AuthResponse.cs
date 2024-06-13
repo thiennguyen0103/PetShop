@@ -1,4 +1,6 @@
-﻿namespace PetShop.Application.Common.Models.Auth
+﻿using System.Text.Json.Serialization;
+
+namespace PetShop.Application.Common.Models.Auth
 {
     public class AuthResponse
     {
@@ -8,6 +10,7 @@
         public List<string> Roles { get; set; }
         public bool IsVerified { get; set; }
         public string AccessToken { get; set; }
+        [JsonIgnore]
         public string RefreshToken { get; set; }
     }
 }

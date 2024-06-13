@@ -12,6 +12,7 @@ using PetShop.Domain.Settings;
 using PetShop.Infrastructure.Identity.Helpers;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace PetShop.Infrastructure.Identity.Services
@@ -42,8 +43,8 @@ namespace PetShop.Infrastructure.Identity.Services
             var code = await _userManager.GenerateEmailConfirmationTokenAsync(user);
             code = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(code));
             var route = "api/auth/confirm-email/";
-            var _enpointUri = new Uri(string.Concat($"{origin}/", route));
-            var verificationUri = QueryHelpers.AddQueryString(_enpointUri.ToString(), "userId", user.Id.ToString());
+            var endpointUri = new Uri(string.Concat($"{origin}/", route));
+            var verificationUri = QueryHelpers.AddQueryString(endpointUri.ToString(), "userId", user.Id.ToString());
             verificationUri = QueryHelpers.AddQueryString(verificationUri, "code", code);
             //Email Service Call Here
             return verificationUri;
@@ -76,16 +77,15 @@ namespace PetShop.Infrastructure.Identity.Services
             {
                 await _userManager.AddToRoleAsync(user, Roles.Client.ToString());
                 var verificationUri = await SendVerificationEmail(user, origin);
-                // var verificationUri = await SendVerificationEmail(user, origin);
-                // //TODO: Attach Email Service here and configure it via appsettings
 
-                // await _emailService.SendAsync(new EmailRequest()
-                // {
-                //     From = "thiennguyen.fsd@gmail.com",
-                //     To = user.Email,
-                //     Body = $"Please confirm your account by visiting this URL {verificationUri}",
-                //     Subject = "Confirm Registration"
-                // });
+                //TODO: Attach Email Service here and configure it via appsettings
+                await _emailService.SendAsync(new EmailRequest()
+                {
+                    From = "thiennguyen.fsd@gmail.com",
+                    To = user.Email,
+                    Body = $"Please confirm your account by visiting this URL {verificationUri}",
+                    Subject = "Confirm Registration"
+                });
                 return new Response<Guid>(
                     user.Id,
                     message: $"User registered. Please confirm your account by visiting this URL {verificationUri}"
@@ -97,9 +97,20 @@ namespace PetShop.Infrastructure.Identity.Services
             }
         }
 
-        public Task<Response<Guid>> ConfirmEmailAsync(Guid userId, string code)
+        public async Task<Response<Guid>> ConfirmEmailAsync(Guid userId, string code)
         {
-            throw new NotImplementedException();
+            var user = await _userManager.FindByIdAsync(userId.ToString());
+            code = Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(code));
+
+            var result = await _userManager.ConfirmEmailAsync(user, code);
+            if (result.Succeeded)
+            {
+                return new Response<Guid>(user.Id, message: $"Account confirmed for {user.Email}. You can now login your account.");
+            }
+            else
+            {
+                throw new ApiException($"An error occurred while confirming {user.Email}");
+            }
         }
 
         public Task ForgotPassword(ForgotPasswordRequest model, string origin)
@@ -107,14 +118,38 @@ namespace PetShop.Infrastructure.Identity.Services
             throw new NotImplementedException();
         }
 
-        public Task<Response<AuthResponse>> LoginAsync(AuthRequest request, string ipAddress)
+        public async Task<Response<AuthResponse>> LoginAsync(AuthRequest request, string ipAddress)
         {
-            throw new NotImplementedException();
-        }
+            var user = await _userManager.FindByEmailAsync(request.Email);
+            if (user is null)
+            {
+                throw new ApiException($"No accounts registered with {request.Email}");
+            }
 
-        public Task<Response<Guid>> VerifyEmail(VerifyEmailRequest model)
-        {
-            throw new NotImplementedException();
+            var result = await _signInManager.PasswordSignInAsync(user.UserName, request.Password, false, lockoutOnFailure: false);
+            if (!result.Succeeded)
+            {
+                throw new ApiException($"Invalid credential for '{user.UserName}'");
+            }
+            if (!user.EmailConfirmed)
+            {
+                throw new ApiException($"Account Not Confirmed for '{request.Email}'.");
+            }
+
+            JwtSecurityToken jwtSecurityToken = await GenerateJWToken(user);
+            var rolesList = await _userManager.GetRolesAsync(user).ConfigureAwait(false);
+            var refreshToken = GenerateRefreshToken(ipAddress);
+            AuthResponse response = new()
+            {
+                Id = user.Id,
+                Email = user.Email,
+                UserName = user.UserName,
+                AccessToken = new JwtSecurityTokenHandler().WriteToken(jwtSecurityToken),
+                Roles = rolesList.ToList(),
+                IsVerified = user.EmailConfirmed,
+                RefreshToken = refreshToken.Token
+            };
+            return new Response<AuthResponse>(response, $"Authenticated {user.UserName}");
         }
 
         private async Task<JwtSecurityToken> GenerateJWToken(User user)
@@ -143,15 +178,34 @@ namespace PetShop.Infrastructure.Identity.Services
             .Union(roleClaims);
 
             var symmetricSecurityKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_jwtSettings.Key));
-            var signingCredentials = new SigningCredentials(symmetricSecurityKey, SecurityAlgorithms.HmacSha256);
+            var signingCredentials = new SigningCredentials(symmetricSecurityKey, SecurityAlgorithms.HmacSha256Signature);
 
             var jwtSecurityToken = new JwtSecurityToken(
                 issuer: _jwtSettings.Issuer,
                 audience: _jwtSettings.Audience,
-            claims: claims,
+                claims: claims,
                 expires: DateTime.UtcNow.AddMinutes(_jwtSettings.DurationInMinutes),
                 signingCredentials: signingCredentials);
             return jwtSecurityToken;
+        }
+
+        private string RandomTokenString()
+        {
+            var randomNumber = new Byte[32];
+            RandomNumberGenerator.Fill(randomNumber);
+            string token = Convert.ToBase64String(randomNumber);
+            return token;
+        }
+
+        private RefreshToken GenerateRefreshToken(string ipAddress)
+        {
+            return new RefreshToken
+            {
+                Token = RandomTokenString(),
+                Expires = DateTime.UtcNow.AddDays(7),
+                CreatedAt = DateTime.UtcNow,
+                CreatedByIp = ipAddress
+            };
         }
     }
 }

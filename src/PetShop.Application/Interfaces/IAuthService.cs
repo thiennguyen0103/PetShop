@@ -9,6 +9,5 @@ namespace PetShop.Application.Interfaces
         Task<Response<Guid>> RegisterAsync(RegisterRequest request, string origin);
         Task<Response<Guid>> ConfirmEmailAsync(Guid userId, string code);
         Task ForgotPassword(ForgotPasswordRequest model, string origin);
-        Task<Response<Guid>> VerifyEmail(VerifyEmailRequest model);
     }
 }

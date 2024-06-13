@@ -11,6 +11,7 @@ using Newtonsoft.Json;
 using PetShop.Application.Interfaces;
 using PetShop.Application.Interfaces.Repositories;
 using PetShop.Application.Wrappers;
+using PetShop.Domain;
 using PetShop.Domain.Entities;
 using PetShop.Domain.Settings;
 using PetShop.Infrastructure.Data.Repositories;
@@ -40,6 +41,7 @@ public static class DependencyInjection
 
         // Configurations
         services.Configure<MailSettings>(configuration.GetSection("MailSettings"));
+        services.Configure<MailjetSettings>(configuration.GetSection("MailjetSettings"));
         services.Configure<JWTSettings>(configuration.GetSection("JWTSettings"));
 
         // Register JWTSettings as a singleton
